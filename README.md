@@ -10,8 +10,8 @@ The model files used by this study are published at
 [`dejanseo/chrome_models`](https://huggingface.co/dejanseo/chrome_models) on
 Hugging Face.
 
-This repository is a breakout of the study recorded in
-[openwebui-writer-personas PR #17](https://github.com/blazingbunny/openwebui-writer-personas/pull/17).
+This repository isolates the classifier study as a standalone research
+artifact.
 
 ## Executive summary
 
@@ -34,7 +34,7 @@ This repository is a breakout of the study recorded in
 
 ### 1. Mechanism verification — `9237c2f`
 
-[Original commit](https://github.com/blazingbunny/openwebui-writer-personas/commit/9237c2ff69cd444600d21efc8a825d8618ac5d78)
+Source commit: `9237c2f`
 
 Verified from Chromium's model graphs, decoded metadata, and the corresponding
 Chromium protobuf schemas rather than inferred from a reference implementation:
@@ -51,7 +51,7 @@ train/inference mismatch cannot be ruled out from metadata alone.
 
 ### 2. Ingestion capacity — `8b3646f`
 
-[Original commit](https://github.com/blazingbunny/openwebui-writer-personas/commit/8b3646fdc355bacb45237fca7ba26f4ea3246912)
+Source commit: `8b3646f`
 
 The 64-token input window is a hard per-call limit. The local truncation path
 is silent, so callers must measure or select text before inference.
@@ -72,7 +72,7 @@ be a new design rather than a reproduced Chromium behavior.
 
 ### 3. Local integration — `3213820`
 
-[Original commit](https://github.com/blazingbunny/openwebui-writer-personas/commit/3213820f72dd86463fd7f78614b8b138503ff6fe)
+Source commit: `3213820`
 
 The models were integrated locally before any remote deployment work:
 
@@ -95,6 +95,83 @@ Results from the same query and sources used in the earlier Jina-based test:
 The practical value is one local embedding pass producing three signals,
 without a separate Jina similarity request.
 
+## Combined EDU + SHOP discovery
+
+The key study discovery is that the EDU and Shopping classifiers work best as
+a combined signal rather than as independent filters.
+
+### What the classifiers measure
+
+Both are Chrome on-device models that run locally and without per-request API
+cost:
+
+- **EDU classifier** — scores how educational or formal a snippet is, from 0
+  to 1.
+- **Sales/Shop classifier** — Chrome's Shopping model, scoring how commercial
+  or e-commerce-oriented a snippet is.
+
+### Methodology correction
+
+A naive whole-dataset correlation between the two signals showed almost no
+relationship: `corr(1 - edu, shop) = 0.135`. That result was misleading because
+Shopping was approximately zero for 47 of 50 rows. The correct test was to
+compare EDU on rows where Shopping actually fired against the remaining rows.
+
+### Discovery
+
+Rows with a real Shopping signal—Arena QMS (`shop=1.00`), Veeva
+(`shop=0.301`), and ComplianceQuest (`shop=0.956`)—had measurably lower EDU,
+around `0.77`, than the other rows, around `0.87–0.90`.
+
+This supports an inverse-pair interpretation:
+
+> high SHOP + low EDU = commercial intent
+
+The combined rule is therefore **low EDU and high SHOP**, not high SHOP alone.
+The commercial complement should be carried explicitly as `inv_edu = 1 - edu`
+alongside `shop`.
+
+### Recommended pre-screen rule
+
+| Condition | Action |
+| --- | --- |
+| `edu >= 0.7` | Keep as clearly educational |
+| `0.6 <= edu < 0.7` | Marginal; let the reranker decide |
+| `edu < 0.6` and/or SHOP fires high | Reject or classify as commercial/service/job content |
+
+Designate a candidate as commercial using the stricter inverse-pair rule:
+`shop >= ~0.3 AND edu < ~0.6`.
+
+### Intended workflow
+
+1. Search using title and snippet only. Do not fetch full pages at this stage.
+2. Score each candidate from one local `PASSAGE_EMBEDDER` call:
+   `sim` (query relevance), `edu` (educational content), and `shop`
+   (commercial signal).
+3. Pre-screen with the EDU + SHOP inverse pair: keep educational candidates,
+   drop clear commercial candidates, and pass marginal cases onward.
+4. Fetch survivors and split their pages into header sections.
+5. Rerank sections by relevance using Jina or a local reranker.
+6. Save the best sections to the RAG Knowledge collection.
+7. Synthesize a grounded answer, then apply the voice and scoring stages.
+
+### Caveats
+
+1. **SHOP is narrowly tuned.** It fires on literal e-commerce vocabulary such
+   as cart, checkout, free shipping, and in-stock. It is not a general
+   commercial-page detector: it missed a commercial car-rental page
+   (`shop=0.000`) and false-positived a regulatory document
+   (`shop=0.759`) because of catalog-style formatting. Read it with EDU.
+2. **`inv_edu` is the stronger complement for professional and regulatory
+   content.** Low EDU often identifies service pages, CROs, and job boards even
+   when SHOP does not fire.
+3. **Scale matters.** Use title and snippet text, not full pages. Shopping
+   covers only about 640 tokens—roughly 17% of a typical page—and is sensitive
+   to word order: shuffling text collapsed one observed score from `0.980` to
+   `0.009`.
+4. **This is a pre-screen, not a final gate.** Reranking makes the final
+   selection; the EDU + SHOP pair cheaply thins the candidate pool.
+
 ## Study status
 
 | Area | Status |
@@ -102,6 +179,7 @@ without a separate Jina similarity request.
 | Embedder architecture and metric | Verified |
 | Shopping pooling and version compatibility | Verified for tested build |
 | EDU score interpretation | Open; treat as unverified |
+| EDU + SHOP commercial signal | Promising inverse-pair pre-screen; not a final gate |
 | Short title/metadata ingestion | Measured and workable |
 | Full-page ingestion | Capacity constraint measured |
 | Chunk selection | Not yet implemented |
@@ -123,8 +201,6 @@ without a separate Jina similarity request.
 
 The model artifacts are sourced from
 [`dejanseo/chrome_models`](https://huggingface.co/dejanseo/chrome_models).
-All three findings originated in the
-[`openwebui-writer-personas`](https://github.com/blazingbunny/openwebui-writer-personas)
-repository and were documented in PR #17. This breakout repository is intended
-to isolate the classifier study from the broader persona and Mercury Researcher
-work.
+The three source findings are preserved by commit identifiers `9237c2f`,
+`8b3646f`, and `3213820`. This breakout repository is intended to isolate the
+classifier study from the broader persona and Mercury Researcher work.
