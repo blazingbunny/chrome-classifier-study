@@ -4,6 +4,12 @@ Focused study of Chromium's local `PASSAGE_EMBEDDER`, `EDU_CLASSIFIER`, and
 `SHOPPING_CLASSIFIER` models, with emphasis on what is verified, what the
 models can ingest, and how they behave in a local research pipeline.
 
+## Model source
+
+The model files used by this study are published at
+[`dejanseo/chrome_models`](https://huggingface.co/dejanseo/chrome_models) on
+Hugging Face.
+
 This repository is a breakout of the study recorded in
 [openwebui-writer-personas PR #17](https://github.com/blazingbunny/openwebui-writer-personas/pull/17).
 
@@ -115,6 +121,8 @@ without a separate Jina similarity request.
 
 ## Provenance
 
+The model artifacts are sourced from
+[`dejanseo/chrome_models`](https://huggingface.co/dejanseo/chrome_models).
 All three findings originated in the
 [`openwebui-writer-personas`](https://github.com/blazingbunny/openwebui-writer-personas)
 repository and were documented in PR #17. This breakout repository is intended
